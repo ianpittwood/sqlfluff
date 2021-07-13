@@ -55,7 +55,7 @@ mssql_dialect.add(
         Ref("BitwiseOrAssignmentSegment"),
         Ref("BitwiseXorAssignmentSegment"),
     ),
-    GoSegement=StringParser(
+    GoSegment=StringParser(
         "GO", KeywordSegment, name="execution_command", type="literal"
     ),
     DoubleQuotedLiteralSegment=NamedParser(
@@ -65,6 +65,7 @@ mssql_dialect.add(
         type="literal",
         trim_chars=('"',),
     ),
+    OrAlterGrammar=Sequence('OR', 'ALTER'),
     VariableNameSegment=RegexParser(
         r"[@][a-zA-Z0-9_\.]*",  # Includes "." for property and field support on variables
         CodeSegment,
@@ -72,6 +73,21 @@ mssql_dialect.add(
         type="variable",
     )
 )
+
+
+@mssql_dialect.segment()
+class GoStatementSegment(BaseSegment):
+    """A `GO` statement.
+
+    mssql: https://docs.microsoft.com/en-us/sql/t-sql/language-elements/sql-server-utilities-statements-go?view=sql-server-ver15
+    """
+
+    type = "go_statement"
+
+    match_grammar = Sequence(
+        Ref("GoSegment"),
+        Ref("NumericLiteralSegment", optional=True)
+    )
 
 
 @mssql_dialect.segment()
@@ -154,21 +170,7 @@ class DropStatementSegment(BaseSegment):
         ),
         Ref("IfExistsGrammar", optional=True),
         Ref("TableReferenceSegment"),
-    )
-
-
-@mssql_dialect.segment()
-class GoStatementSegment(BaseSegment):
-    """A `GO` statement.
-
-    mssql: https://docs.microsoft.com/en-us/sql/t-sql/language-elements/sql-server-utilities-statements-go?view=sql-server-ver15
-    """
-
-    type = "go_statement"
-
-    match_grammar = Sequence(
-        Ref("GoSegment"),
-        Ref("NumericLiteralSegment", optional=True)
+        Ref('GoStatementSegment', optional=True),
     )
 
 
@@ -191,4 +193,28 @@ class SetAssignmentStatementSegment(BaseSegment):
             Ref("VariableNameSegment"),
             Ref("FunctionSegment"),
         ),
+    )
+
+
+@mssql_dialect.segment(replace=True)
+class CreateViewStatementSegment(
+    ansi_dialect.get_segment('CreateViewStatementSegment')
+):
+    """
+    Create view segment.
+
+    https://docs.microsoft.com/en-us/sql/t-sql/statements/create-view-transact-sql?view=sql-server-ver15
+    """
+
+    type = 'create_view_statement'
+
+    match_grammar = Sequence(
+        'CREATE',
+        Ref('OrAlterGrammar', optional=True),
+        'VIEW',
+        Ref("TableReferenceSegment"),
+        'AS',
+        Ref("SelectableGrammar"),
+        Ref("WithNoSchemaBindingClauseSegment", optional=True),
+        Ref('GoStatementSegment', optional=True),
     )
