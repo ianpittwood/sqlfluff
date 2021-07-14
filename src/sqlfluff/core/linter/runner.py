@@ -13,6 +13,8 @@ import multiprocessing.dummy
 import signal
 import sys
 import traceback
+import re
+import click
 from typing import Callable, List
 
 
@@ -32,15 +34,50 @@ class BaseRunner(ABC):
 
     pass_formatter = True
 
+    @staticmethod
+    def process_mssql_statements(raw_file):
+        # Render the file content split by GO statement
+        # match the GO statement in an individual line first then match the keyword
+        statements = re.split('(\nGO\n| GO\n|\nGO )', raw_file)
+        if len(statements) > 1:
+            click.echo(click.style(
+                f'The next file will show multiple times because the dialect was set to mssql and the file '
+                f'contains GO statement(s).',
+                fg='yellow'
+            ))
+            if len(statements) % 2 == 1:
+                # to prevent out of index error when combining elements (we'll loop the step of 2)
+                statements.append('')
+            statements = [
+                f'{statements[i]}{statements[i + 1]}' for i in range(0, len(statements), 2)
+            ]
+
+        # line counter for a more accurate line number report
+        total_lines = 0
+        previous_line_count = 0
+        prepared_statements = []
+        for exec_st in statements:
+            # sum up the previous line count and record the current line count.
+            total_lines += previous_line_count
+            previous_line_count = len(exec_st.splitlines())
+
+            # add correct numbers of newline chars for an accurate line number reporting.
+            prepared_statements.append("\n" * total_lines + exec_st)
+
+        return prepared_statements
+
     def iter_rendered(self, fnames):
         """Iterate through rendered files ready for linting."""
         for fname in fnames:
             if self.linter.dialect.name == 'mssql':
-                # in mssql, GO statement marks a full statement that should be executed first.
+                # in mssql, GO statement indicates a full statement that should be executed first.
                 raw_file, config, encoding = self.linter.load_mssql_raw_file_and_config(fname, self.config)
-                # Render the file content split by GO statement
-                for exec_statement in raw_file.split('GO\n'):
-                    yield fname, self.linter.render_string(exec_statement.strip(r'\n'), fname, config, encoding)
+                exec_statements = self.process_mssql_statements(raw_file)
+
+                for exec_statement in exec_statements:
+                    # the result might show multiple blocks for the same file, to have only one block we will need to
+                    # change how sqlfluff works which will be too huge a project.
+                    yield fname, self.linter.render_string(exec_statement, fname, config, encoding)
             else:
                 yield fname, self.linter.render_file(fname, self.config)
 

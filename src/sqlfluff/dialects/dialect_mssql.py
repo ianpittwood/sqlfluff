@@ -5,7 +5,7 @@ https://docs.microsoft.com/en-us/sql/t-sql/language-reference?view=sql-server-ve
 
 from sqlfluff.core.dialects import load_raw_dialect
 from sqlfluff.core.parser import RegexParser, CodeSegment, BaseSegment, OneOf, Sequence, Ref, AnyNumberOf, \
-    SymbolSegment, StringParser, NamedParser, KeywordSegment
+    SymbolSegment, StringParser, NamedParser, KeywordSegment, Bracketed, Delimited, OptionallyBracketed
 from sqlfluff.dialects.mssql_keywords import mssql_reserved_keywords
 
 # Initialize dialect
@@ -90,6 +90,15 @@ class GoStatementSegment(BaseSegment):
     )
 
 
+class MSSQLSequence(Sequence):
+    """
+    A custom sequence class specially made for mssql, every statement could end with a GO statement to indicate
+    execution.
+    """
+    def __init__(self, *args, **kwargs):
+        super(MSSQLSequence, self).__init__(*args, Ref('GoStatementSegment', optional=True), **kwargs)
+
+
 @mssql_dialect.segment()
 class DeclareStatement(BaseSegment):
     """DECLARE statement.
@@ -100,14 +109,14 @@ class DeclareStatement(BaseSegment):
     type = "declare_statement"
 
     match_grammar = OneOf(
-        Sequence(
+        MSSQLSequence(
             "DECLARE",
             Ref("NakedIdentifierSegment"),
             "CURSOR",
             "FOR",
             Ref("StatementSegment"),
         ),
-        Sequence(
+        MSSQLSequence(
             "DECLARE",
             OneOf("CONTINUE", "EXIT", "UNDO"),
             "HANDLER",
@@ -115,8 +124,8 @@ class DeclareStatement(BaseSegment):
             OneOf(
                 "SQLEXCEPTION",
                 "SQLWARNING",
-                Sequence("NOT", "FOUND"),
-                Sequence(
+                MSSQLSequence("NOT", "FOUND"),
+                MSSQLSequence(
                     "SQLSTATE",
                     Ref.keyword("VALUE", optional=True),
                     Ref("QuotedLiteralSegment"),
@@ -127,20 +136,20 @@ class DeclareStatement(BaseSegment):
                     Ref("NakedIdentifierSegment"),
                 ),
             ),
-            Sequence(Ref("StatementSegment")),
+            MSSQLSequence(Ref("StatementSegment")),
         ),
-        Sequence(
+        MSSQLSequence(
             "DECLARE",
             Ref("NakedIdentifierSegment"),
             "CONDITION",
             "FOR",
             OneOf(Ref("QuotedLiteralSegment"), Ref("NumericLiteralSegment")),
         ),
-        Sequence(
+        MSSQLSequence(
             "DECLARE",
             Ref("VariableNameSegment"),
             Ref("DatatypeSegment"),
-            Sequence(
+            MSSQLSequence(
                 Ref.keyword("DEFAULT"),
                 OneOf(
                     Ref("QuotedLiteralSegment"),
@@ -159,7 +168,7 @@ class DropStatementSegment(BaseSegment):
 
     type = "drop_statement"
 
-    match_grammar = Sequence(
+    match_grammar = MSSQLSequence(
         "DROP",
         OneOf(
             "TABLE",
@@ -170,7 +179,6 @@ class DropStatementSegment(BaseSegment):
         ),
         Ref("IfExistsGrammar", optional=True),
         Ref("TableReferenceSegment"),
-        Ref('GoStatementSegment', optional=True),
     )
 
 
@@ -183,7 +191,7 @@ class SetAssignmentStatementSegment(BaseSegment):
 
     type = "set_statement"
 
-    match_grammar = Sequence(
+    match_grammar = MSSQLSequence(
         "SET",
         Ref("VariableNameSegment"),
         OneOf(Ref("EqualsSegment"), Ref("ArithmeticBinaryAssignmentOperatorGrammar")),
@@ -208,7 +216,7 @@ class CreateViewStatementSegment(
 
     type = 'create_view_statement'
 
-    match_grammar = Sequence(
+    match_grammar = MSSQLSequence(
         'CREATE',
         Ref('OrAlterGrammar', optional=True),
         'VIEW',
@@ -217,4 +225,44 @@ class CreateViewStatementSegment(
         Ref("SelectableGrammar"),
         Ref("WithNoSchemaBindingClauseSegment", optional=True),
         Ref('GoStatementSegment', optional=True),
+    )
+
+
+@mssql_dialect.segment(replace=True)
+class CreateTableStatementSegment(
+    ansi_dialect.get_segment('CreateTableStatementSegment')
+):
+    """
+    Create table statement
+
+    https://docs.microsoft.com/en-us/sql/t-sql/statements/create-table-transact-sql?view=sql-server-ver15
+    """
+    type = 'create_table_statement'
+
+    match_grammar = MSSQLSequence(
+        'CREATE',
+        Ref('OrAlterGrammar', optional=True),
+        'TABLE',
+        Ref('TableReferenceSegment'),
+        OptionallyBracketed(OneOf(
+            # Columns and comment syntax:
+            Sequence(
+                Bracketed(
+                    Delimited(
+                        OneOf(
+                            Ref("TableConstraintSegment"),
+                            Ref("ColumnDefinitionSegment"),
+                        ),
+                    )
+                ),
+                Ref("CommentClauseSegment", optional=True),
+            ),
+            # Create AS syntax:
+            Sequence(
+                "AS",
+                OptionallyBracketed(Ref("SelectableGrammar")),
+            ),
+            # Create like syntax
+            Sequence("LIKE", Ref("TableReferenceSegment")),
+        )),
     )
