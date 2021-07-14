@@ -35,7 +35,14 @@ class BaseRunner(ABC):
     def iter_rendered(self, fnames):
         """Iterate through rendered files ready for linting."""
         for fname in fnames:
-            yield fname, self.linter.render_file(fname, self.config)
+            if self.linter.dialect.name == 'mssql':
+                # in mssql, GO statement marks a full statement that should be executed first.
+                raw_file, config, encoding = self.linter.load_mssql_raw_file_and_config(fname, self.config)
+                # Render the file content split by GO statement
+                for exec_statement in raw_file.split('GO\n'):
+                    yield fname, self.linter.render_string(exec_statement.strip(r'\n'), fname, config, encoding)
+            else:
+                yield fname, self.linter.render_file(fname, self.config)
 
     def iter_partials(self, fnames, fix: bool = False):
         """Iterate through partials for linted files.

@@ -566,6 +566,17 @@ class Linter:
         # Render the file
         return self.render_string(raw_file, fname, config, encoding)
 
+    def load_mssql_raw_file_and_config(self, fname: str, root_config: FluffConfig):
+        """
+        caller: runner.iter_rendered()
+
+        Load and return the mssql raw file content with necessary configs for the caller to use.
+
+        This is done due to caller expects a completed string render obj to be returned then process and yield back
+        to the grandparent,
+        """
+        return self._load_raw_file_and_config(fname, root_config)
+
     def parse_string(
         self,
         in_str: str,
